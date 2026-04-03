@@ -11,6 +11,10 @@ from datetime import datetime, time
 from .config import load_config, AppConfig
 from .connection import IBKRConnection
 from .deepseek_client import DeepSeekClient
+from .market_calendar import (
+    is_market_holiday, is_any_session_active, get_current_session,
+    Session, next_trading_day, get_session_info,
+)
 from .message_bus import MessageBus
 from .risk_gatekeeper import RiskGatekeeper
 from .agents.ceo import CEOAgent
@@ -67,12 +71,22 @@ class TradingOrchestrator:
             self.executor, self.position_manager, self.compliance, self.auditor,
         ]
 
-    async def start(self):
+    async def start(self) -> bool:
         """Boot the entire system."""
         logger.info("=" * 60)
         logger.info("HUMANLESS TRADING OPERATIONS — Starting up")
-        logger.info("Mode: %s | Date: %s", self.config.trading_mode, datetime.now().strftime("%Y-%m-%d"))
+        logger.info("Mode: %s | Date: %s",
+                     self.config.trading_mode, datetime.now().strftime("%Y-%m-%d"))
         logger.info("=" * 60)
+
+        # Check market calendar
+        session_info = get_session_info()
+        logger.info("Market status: %s", session_info)
+
+        if is_market_holiday():
+            next_day = next_trading_day()
+            logger.warning("TODAY IS A MARKET HOLIDAY. Next trading day: %s", next_day)
+            logger.warning("System will wait for next trading day.")
 
         # 1. Start DeepSeek client
         await self.deepseek.start()
@@ -87,11 +101,9 @@ class TradingOrchestrator:
         # Log account info
         summary = await self.ibkr.get_account_summary()
         equity = summary.get("NetLiquidation", 0)
-        logger.info("Account equity: $%s", f"{equity:,.2f}")
-
-        if equity < 200_000 and self.config.trading_mode == "live":
-            logger.critical("Equity $%.0f below $200K minimum — aborting", equity)
-            return False
+        buying_power = summary.get("BuyingPower", 0)
+        logger.info("Account equity: $%s | Buying power: $%s",
+                     f"{equity:,.2f}", f"{buying_power:,.2f}")
 
         # 3. Start all agents
         for agent in self._all_agents:
@@ -102,7 +114,7 @@ class TradingOrchestrator:
         self.scout.reset_daily()
 
         self._running = True
-        logger.info("All agents started. System ready.")
+        logger.info("All %d agents started. System ready.", len(self._all_agents))
         return True
 
     async def stop(self):
@@ -110,69 +122,100 @@ class TradingOrchestrator:
         logger.info("Shutting down...")
         self._running = False
 
-        # Stop all agents
         for agent in self._all_agents:
             await agent.stop()
 
-        # Disconnect
         await self.ibkr.disconnect()
         await self.deepseek.stop()
         logger.info("Shutdown complete.")
 
-    async def run_trading_day(self):
-        """Execute the full daily trading lifecycle."""
+    async def run(self):
+        """Main run loop — handles holidays, ETH, RTH, and overnight."""
         if not self._running:
             return
 
-        # ── Pre-Market (08:00 - 09:25) ───────────────────────────
-        logger.info("=== PRE-MARKET PHASE ===")
-        await self._wait_until(time(8, 0), "pre-market")
-
-        # CEO morning briefing (triggers Scout scan)
-        await self.ceo.morning_briefing()
-
-        # Wait for scanning/analysis pipeline
-        await asyncio.sleep(60)
-
-        # ── Market Open (09:30) ───────────────────────────────────
-        logger.info("=== MARKET OPEN ===")
-        await self._wait_until(time(9, 30), "market open")
-
-        # Position Manager monitoring loop is already running from start()
-        # Scout, Analyst, Strategist, Compliance, Executor are all event-driven via bus
-
-        # ── Active Trading (09:30 - 15:30) ────────────────────────
-        logger.info("=== ACTIVE TRADING ===")
-        scan_interval = 15 * 60  # 15 minutes
-
         while self._running:
-            now = datetime.now().time()
+            today = datetime.now().date()
 
-            # Past entry cutoff?
-            if now >= time(15, 30):
-                logger.info("=== WIND-DOWN PHASE ===")
-                break
+            # If holiday, wait until next trading day
+            if is_market_holiday(today):
+                next_day = next_trading_day(today)
+                logger.info("Market closed today. Next trading day: %s. Sleeping...", next_day)
+                # Sleep until 03:50 ET on next trading day (10 min before ETH opens)
+                await self._sleep_until_date(next_day, time(3, 50))
+                self.gatekeeper.reset_daily()
+                self.scout.reset_daily()
+                continue
 
-            # Periodic scan
-            await self.scout.scan_market()
+            # Run the full trading day (ETH + RTH + ETH)
+            await self._run_trading_day()
 
-            # Wait for next scan cycle
-            await asyncio.sleep(scan_interval)
+            # After trading day, run audit
+            await self._run_post_market()
 
-        # ── Wind-Down (15:30 - 15:50) ────────────────────────────
-        # Position Manager handles this automatically via its monitoring loop
-        await self._wait_until(time(15, 55), "post-close")
+            # Sleep until next day's pre-market
+            next_day = next_trading_day(today)
+            logger.info("Trading day complete. Next session: %s 04:00 ET", next_day)
+            await self._sleep_until_date(next_day, time(3, 50))
+            self.gatekeeper.reset_daily()
+            self.scout.reset_daily()
 
-        # ── Post-Market (16:00+) ─────────────────────────────────
-        logger.info("=== POST-MARKET ===")
+    async def _run_trading_day(self):
+        """Execute a full trading day: ETH pre-market → RTH → ETH after-hours."""
+
+        # ── ETH Pre-Market (04:00 - 09:30) ───────────────────────
+        await self._wait_until(time(4, 0), "ETH pre-market")
+
+        if self._running:
+            logger.info("=== ETH PRE-MARKET SESSION ===")
+            await self.ceo.morning_briefing()
+
+            # Scout scans every 15 min during pre-market
+            while self._running and datetime.now().time() < time(9, 25):
+                session = get_current_session()
+                if session == Session.ETH_PRE_MARKET:
+                    await self.scout.scan_market()
+                await asyncio.sleep(900)  # 15 min
+
+        # ── RTH (09:30 - 16:00) ──────────────────────────────────
+        await self._wait_until(time(9, 30), "RTH market open")
+
+        if self._running:
+            logger.info("=== REGULAR TRADING HOURS ===")
+
+            # Continuous scanning during RTH
+            while self._running:
+                session = get_current_session()
+                if session != Session.RTH:
+                    break
+                await self.scout.scan_market()
+                await asyncio.sleep(600)  # 10 min during RTH (more frequent)
+
+        # ── ETH After-Hours (16:00 - 20:00) ──────────────────────
+        if self._running:
+            logger.info("=== ETH AFTER-HOURS SESSION ===")
+
+            while self._running:
+                session = get_current_session()
+                if session != Session.ETH_AFTER_HOURS:
+                    break
+                # Scan for after-hours earnings reactions
+                await self.scout.scan_market()
+                await asyncio.sleep(900)  # 15 min
+
+    async def _run_post_market(self):
+        """Post-market review and audit."""
+        if not self._running:
+            return
+
+        logger.info("=== POST-MARKET REVIEW ===")
         await self.ceo.end_of_day_review()
 
         # Wait for audit to complete
         await asyncio.sleep(120)
 
-        logger.info("=== TRADING DAY COMPLETE ===")
         daily_pnl = await self.ibkr.get_daily_pnl()
-        logger.info("Daily P&L: $%s", f"{daily_pnl:,.2f}")
+        logger.info("=== TRADING DAY COMPLETE === Daily P&L: $%s", f"{daily_pnl:,.2f}")
 
     async def _wait_until(self, target: time, label: str):
         """Wait until a specific time of day."""
@@ -180,14 +223,25 @@ class TradingOrchestrator:
             now = datetime.now().time()
             if now >= target:
                 return
-            # Calculate seconds to wait
             now_secs = now.hour * 3600 + now.minute * 60 + now.second
             target_secs = target.hour * 3600 + target.minute * 60 + target.second
             wait = target_secs - now_secs
             if wait <= 0:
                 return
-            logger.info("Waiting %d seconds for %s (%s)...", min(wait, 60), label, target)
-            await asyncio.sleep(min(wait, 60))
+            logger.info("Waiting %d seconds for %s (%s)...", min(wait, 300), label, target)
+            await asyncio.sleep(min(wait, 300))
+
+    async def _sleep_until_date(self, target_date, target_time: time):
+        """Sleep until a specific date and time."""
+        while self._running:
+            now = datetime.now()
+            target = datetime.combine(target_date, target_time)
+            delta = (target - now).total_seconds()
+            if delta <= 0:
+                return
+            logger.info("Sleeping %.0f seconds until %s %s...",
+                        min(delta, 3600), target_date, target_time)
+            await asyncio.sleep(min(delta, 3600))
 
     async def emergency_shutdown(self):
         """Emergency: flatten everything and shut down."""
@@ -198,30 +252,26 @@ class TradingOrchestrator:
 
 async def main():
     """Entry point."""
-    config = load_config()
-
-    # Create logs directory
     import os
     os.makedirs("logs", exist_ok=True)
 
+    config = load_config()
     orchestrator = TradingOrchestrator(config)
 
-    # Handle SIGINT/SIGTERM for graceful shutdown
+    # Handle SIGINT/SIGTERM
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, lambda: asyncio.create_task(orchestrator.stop()))
         except NotImplementedError:
-            # Windows doesn't support add_signal_handler
-            pass
+            pass  # Windows
 
-    # Start the system
     if not await orchestrator.start():
         logger.critical("Startup failed — exiting")
         sys.exit(1)
 
     try:
-        await orchestrator.run_trading_day()
+        await orchestrator.run()
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
     except Exception as e:

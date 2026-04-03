@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from .base import BaseAgent
+from ..market_calendar import (
+    is_any_session_active, get_current_session, Session,
+    is_early_close, get_flatten_time, is_market_holiday,
+)
 from ..models import (
     AgentMessage, OpenPosition, PortfolioState, TradePlan,
     Direction, CircuitBreakerAction,
@@ -64,13 +68,13 @@ class PositionManagerAgent(BaseAgent):
     # ── Core Monitoring Loop ──────────────────────────────────────────
 
     async def _monitoring_loop(self):
-        """Main loop — runs every 60 seconds during market hours."""
+        """Main loop — runs every 60 seconds during any active session."""
         while self._monitoring:
             try:
-                now = datetime.now().time()
+                session = get_current_session()
 
-                # Only monitor during market hours
-                if time(9, 30) <= now <= time(16, 0):
+                # Monitor during ANY active session (ETH + RTH)
+                if session in (Session.ETH_PRE_MARKET, Session.RTH, Session.ETH_AFTER_HOURS):
                     await self._monitor_cycle()
                     self._cycle_count += 1
 
@@ -80,10 +84,21 @@ class PositionManagerAgent(BaseAgent):
                     if self._cycle_count % 30 == 0:  # every 30 min
                         await self._send_ceo_update()
 
-                # Check force-flatten deadline
-                h, m = map(int, self.risk_limits.force_flatten_time.split(":"))
-                if now >= time(h, m) and self._positions:
-                    await self._force_flatten_all("EOD force close — hard deadline")
+                # Check early close flatten deadline
+                if is_early_close():
+                    flatten_time = get_flatten_time()
+                    if datetime.now().time() >= flatten_time and self._positions:
+                        await self._force_flatten_all("Early close day — flatten deadline")
+
+                # Check ETH after-hours wind-down (19:30 for non-overnight positions)
+                if session == Session.ETH_AFTER_HOURS:
+                    if datetime.now().time() >= datetime.strptime("19:30", "%H:%M").time():
+                        # Close positions NOT marked as overnight holds
+                        for ticker, pos in list(self._positions.items()):
+                            plan = self._trade_plans.get(ticker)
+                            is_overnight = plan and plan.strategy == "overnight_swing"
+                            if not is_overnight:
+                                await self._close_position(pos, "ETH wind-down — not overnight hold")
 
                 await asyncio.sleep(60)
 
@@ -116,19 +131,15 @@ class PositionManagerAgent(BaseAgent):
         for ticker, pos in list(self._positions.items()):
             await self._check_position(pos, portfolio)
 
-        # Check daily target
+        # Check daily target (informational — keep trading per new rules)
         if portfolio.daily_pnl >= self.risk_limits.daily_profit_target_usd:
-            logger.info("[PositionManager] Daily target $%.0f reached!", portfolio.daily_pnl)
-            self.log_to_diary(f"POSITION_MANAGER: Daily target HIT — P&L ${portfolio.daily_pnl:,.0f}")
-            await self.send(
-                to="ceo",
-                message_type="daily_target_hit",
-                payload={"daily_pnl": portfolio.daily_pnl},
-                priority="high",
-            )
+            if self._cycle_count % 30 == 0:  # only log every 30 min
+                logger.info("[PositionManager] Daily target $%.0f reached! Continuing to trade.",
+                           portfolio.daily_pnl)
+                self.log_to_diary(f"POSITION_MANAGER: Daily target HIT — P&L ${portfolio.daily_pnl:,.0f}. Continuing.")
 
         # Check approaching drawdown
-        if portfolio.daily_pnl_pct <= -1.5:
+        if portfolio.daily_pnl_pct <= -(self.risk_limits.daily_max_drawdown_pct * 0.75):
             logger.warning("[PositionManager] Approaching drawdown limit: %.2f%%",
                           portfolio.daily_pnl_pct)
             await self.send(
@@ -169,21 +180,7 @@ class PositionManagerAgent(BaseAgent):
             await self._close_position(pos, "Take profit reached")
             return
 
-        # 3. Time limit exceeded
-        if pos.time_held_minutes > self.risk_limits.max_hold_time_minutes:
-            logger.warning("[PositionManager] TIME LIMIT on %s (%.0f min)",
-                          pos.ticker, pos.time_held_minutes)
-            await self.send(
-                to="strategist",
-                message_type="time_limit_alert",
-                payload={"ticker": pos.ticker, "minutes_held": pos.time_held_minutes},
-                priority="high",
-            )
-            # Force close after warning
-            await self._close_position(pos, f"Hold time exceeded ({pos.time_held_minutes:.0f}m)")
-            return
-
-        # 4. Move stop to breakeven at 2:1 R/R
+        # 3. Move stop to breakeven at 2:1 R/R
         if pos.risk_reward_ratio >= 2.0 and not self._at_breakeven(pos):
             old_stop = pos.stop_loss
             pos.stop_loss = pos.entry_price
@@ -193,23 +190,29 @@ class PositionManagerAgent(BaseAgent):
                 f"POSITION_MANAGER: {pos.ticker} stop → breakeven ${pos.stop_loss:.2f} (2:1 R/R)"
             )
 
-        # 5. Wind-down period (15:30+)
-        if datetime.now().time() >= time(15, 30):
-            if pos.unrealized_pnl < 0:
-                await self._close_position(pos, "Wind-down: closing loser")
+        # 4. Session-aware checks
+        session = get_current_session()
+
+        # In ETH sessions, use DeepSeek to evaluate if position should be held
+        if session in (Session.ETH_PRE_MARKET, Session.ETH_AFTER_HOURS):
+            # If position is significantly negative in thin liquidity, consider closing
+            if pos.unrealized_pnl_pct < -2.0:
+                logger.warning("[PositionManager] %s down %.1f%% in ETH — closing",
+                              pos.ticker, pos.unrealized_pnl_pct)
+                await self._close_position(pos, f"ETH session loss > 2% ({pos.unrealized_pnl_pct:.1f}%)")
                 return
 
     def _stop_hit(self, pos: OpenPosition) -> bool:
         if pos.direction == Direction.LONG:
-            return pos.current_price <= pos.stop_loss
+            return pos.current_price <= pos.stop_loss and pos.stop_loss > 0
         else:
-            return pos.current_price >= pos.stop_loss
+            return pos.current_price >= pos.stop_loss and pos.stop_loss > 0
 
     def _target_hit(self, pos: OpenPosition) -> bool:
         if pos.direction == Direction.LONG:
-            return pos.current_price >= pos.take_profit
+            return pos.current_price >= pos.take_profit and pos.take_profit > 0
         else:
-            return pos.current_price <= pos.take_profit
+            return pos.current_price <= pos.take_profit and pos.take_profit > 0
 
     def _at_breakeven(self, pos: OpenPosition) -> bool:
         return abs(pos.stop_loss - pos.entry_price) < 0.01
@@ -246,6 +249,14 @@ class PositionManagerAgent(BaseAgent):
                     "won": pos.unrealized_pnl > 0,
                     "pnl": pos.unrealized_pnl,
                 },
+            )
+
+        # Notify compliance if closed at loss (wash sale tracking)
+        if pos.unrealized_pnl < 0:
+            await self.send(
+                to="compliance",
+                message_type="loss_close_recorded",
+                payload={"ticker": pos.ticker},
             )
 
         # Remove from tracking
@@ -310,6 +321,7 @@ class PositionManagerAgent(BaseAgent):
     async def _send_ceo_update(self):
         """Send portfolio summary to CEO every 30 minutes."""
         portfolio = await self.ibkr.get_portfolio_state()
+        session = get_current_session()
         await self.send(
             to="ceo",
             message_type="portfolio_summary",
@@ -319,6 +331,7 @@ class PositionManagerAgent(BaseAgent):
                 "equity": portfolio.equity,
                 "position_count": portfolio.position_count,
                 "margin_used_pct": portfolio.margin_used_pct,
+                "session": session.value,
             },
         )
 

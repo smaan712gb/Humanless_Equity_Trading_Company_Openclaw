@@ -1,47 +1,71 @@
 # Risk Management Policy — Enforced by Risk Gatekeeper Skill
 # These limits are HARD — the LLM cannot override them.
+# Updated: Full buying power, unlimited trades, ETH+RTH aware.
 
 position_limits:
-  max_single_position_pct: 15        # % of portfolio in one ticker
-  max_sector_exposure_pct: 30        # % of portfolio in one sector
-  max_concurrent_positions: 8        # total open positions at any time
-  max_position_value_usd: 100000     # per position dollar cap
-  min_position_value_usd: 5000       # don't waste execution on tiny positions
+  max_single_position_pct: 25        # % of portfolio in one ticker (raised for full BP)
+  max_sector_exposure_pct: 50        # % of portfolio in one sector
+  max_concurrent_positions: 20       # no artificial cap — trade as needed
+  max_position_value_usd: 500000     # per position dollar cap (raised for full BP)
+  min_position_value_usd: 2000       # don't waste execution on tiny positions
 
 loss_limits:
-  daily_max_drawdown_pct: 2.0        # -2% → full shutdown
-  per_trade_max_loss_pct: 0.5        # -0.5% of portfolio per trade
-  per_trade_max_loss_usd: 2500       # hard dollar stop per trade
-  consecutive_loss_cooldown: 3       # after 3 consecutive losses, pause 30 min
-  weekly_max_drawdown_pct: 5.0       # -5% week → reduce to Quarter Kelly
+  daily_max_drawdown_pct: 3.0        # -3% → full shutdown (wider for aggressive style)
+  per_trade_max_loss_pct: 1.0        # -1% of portfolio per trade
+  per_trade_max_loss_usd: 5000       # hard dollar stop per trade
+  consecutive_loss_cooldown: 5       # after 5 consecutive losses, pause 15 min
+  weekly_max_drawdown_pct: 7.0       # -7% week → reduce to Quarter Kelly
 
 profit_targets:
   daily_profit_target_usd: 20000
-  action_on_target_hit: reduce_size  # scale down to 25% size after target
-  action_on_150pct_target: stop      # full stop at $30K (protect gains)
+  action_on_target_hit: keep_trading  # keep going — no reason to stop making money
+  action_on_200pct_target: reduce_size  # scale down at $40K (protect big day)
 
 execution_limits:
-  max_trades_per_day: 40
-  max_trades_per_hour: 10
-  min_time_between_trades_sec: 30    # prevent rapid-fire loops
-  max_order_size_shares: 5000
-  banned_order_types: [market_on_close_large]
+  max_trades_per_day: 0              # 0 = unlimited
+  max_trades_per_hour: 0             # 0 = unlimited
+  min_time_between_trades_sec: 5     # 5s debounce only (prevent accidental double-clicks)
+  max_order_size_shares: 10000
+  banned_order_types: []
 
 margin_rules:
-  max_margin_utilization: 0.60
+  max_margin_utilization: 1.00       # full buying power authorized
   margin_call_action: liquidate_worst_performer
-  overnight_margin_max: 0.30         # reduce exposure into close
+  overnight_margin_max: 0.50         # reduce into close but still allow overnight if ETH active
 
 circuit_breakers:
-  vix_above_35: reduce_all_50pct
-  spy_drop_2pct_intraday: halt_new_entries
-  account_equity_below_200k: full_shutdown
-  api_disconnect_seconds: 30         # if disconnected 30s, flatten all
+  vix_above_40: reduce_all_50pct     # raised from 35 — high-beta needs room
+  spy_drop_3pct_intraday: halt_new_entries  # raised from 2%
+  account_equity_below_100k: full_shutdown  # lowered floor
+  api_disconnect_seconds: 60         # 60s tolerance (was 30)
 
 high_beta_specific:
-  # These stocks move 2-4x the market — tighter controls
-  max_hold_time_minutes: 120         # no bagholding high-beta > 2 hours
+  max_hold_time_minutes: 0           # 0 = no limit — agents decide when to exit
   force_stop_loss: true              # every position MUST have a stop
   stop_loss_type: trailing           # default trailing stop
   trailing_stop_pct: 1.5             # 1.5% trailing on high-beta
   take_profit_ratio: 2.0             # 2:1 reward-to-risk minimum
+
+session_rules:
+  eth_pre_market:
+    enabled: true
+    hours: "04:00-09:30 ET"
+    position_size_multiplier: 0.50   # half size in pre-market (thin liquidity)
+    order_types_allowed: [LIMIT, STOP, TRAIL]  # NO market orders
+    outside_rth: true
+  rth:
+    enabled: true
+    hours: "09:30-16:00 ET"
+    position_size_multiplier: 1.00   # full size
+    order_types_allowed: [LIMIT, MARKET, STOP, TRAIL]
+    outside_rth: false
+  eth_after_hours:
+    enabled: true
+    hours: "16:00-20:00 ET"
+    position_size_multiplier: 0.50   # half size in after-hours
+    order_types_allowed: [LIMIT, STOP, TRAIL]  # NO market orders
+    outside_rth: true
+  overnight:
+    allowed: true                    # can hold overnight if setup warrants it
+    max_overnight_positions: 5
+    max_overnight_exposure_pct: 30   # max 30% of portfolio overnight

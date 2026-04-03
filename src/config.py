@@ -34,22 +34,20 @@ class DeepSeekConfig:
 
 @dataclass
 class RiskLimits:
-    max_single_position_pct: float = 15.0
-    max_sector_exposure_pct: float = 30.0
-    max_concurrent_positions: int = 8
-    max_position_value_usd: float = 100_000.0
-    daily_max_drawdown_pct: float = 2.0
-    per_trade_max_loss_usd: float = 2500.0
-    max_trades_per_day: int = 40
-    max_trades_per_hour: int = 10
-    min_time_between_trades_sec: int = 30
-    max_margin_utilization: float = 0.60
-    max_hold_time_minutes: int = 120
+    max_single_position_pct: float = 25.0
+    max_sector_exposure_pct: float = 50.0
+    max_concurrent_positions: int = 20      # 0 = unlimited
+    max_position_value_usd: float = 500_000.0
+    daily_max_drawdown_pct: float = 3.0
+    per_trade_max_loss_usd: float = 5000.0
+    max_trades_per_day: int = 0             # 0 = unlimited
+    max_trades_per_hour: int = 0            # 0 = unlimited
+    min_time_between_trades_sec: int = 5    # debounce only
+    max_margin_utilization: float = 1.00    # full buying power
+    max_hold_time_minutes: int = 0          # 0 = no limit
     daily_profit_target_usd: float = 20_000.0
     trailing_stop_pct: float = 1.5
     take_profit_ratio: float = 2.0
-    force_flatten_time: str = "15:50"
-    no_new_entries_after: str = "15:30"
 
 
 @dataclass
@@ -78,25 +76,28 @@ def load_config() -> AppConfig:
             risk_yaml = yaml.safe_load(f)
 
         pl = risk_yaml.get("position_limits", {})
-        config.risk.max_single_position_pct = pl.get("max_single_position_pct", 15.0)
-        config.risk.max_sector_exposure_pct = pl.get("max_sector_exposure_pct", 30.0)
-        config.risk.max_concurrent_positions = pl.get("max_concurrent_positions", 8)
-        config.risk.max_position_value_usd = pl.get("max_position_value_usd", 100_000.0)
+        config.risk.max_single_position_pct = pl.get("max_single_position_pct", 25.0)
+        config.risk.max_sector_exposure_pct = pl.get("max_sector_exposure_pct", 50.0)
+        config.risk.max_concurrent_positions = pl.get("max_concurrent_positions", 20)
+        config.risk.max_position_value_usd = pl.get("max_position_value_usd", 500_000.0)
 
         ll = risk_yaml.get("loss_limits", {})
-        config.risk.daily_max_drawdown_pct = ll.get("daily_max_drawdown_pct", 2.0)
-        config.risk.per_trade_max_loss_usd = ll.get("per_trade_max_loss_usd", 2500.0)
+        config.risk.daily_max_drawdown_pct = ll.get("daily_max_drawdown_pct", 3.0)
+        config.risk.per_trade_max_loss_usd = ll.get("per_trade_max_loss_usd", 5000.0)
 
         el = risk_yaml.get("execution_limits", {})
-        config.risk.max_trades_per_day = el.get("max_trades_per_day", 40)
-        config.risk.max_trades_per_hour = el.get("max_trades_per_hour", 10)
-        config.risk.min_time_between_trades_sec = el.get("min_time_between_trades_sec", 30)
+        config.risk.max_trades_per_day = el.get("max_trades_per_day", 0)
+        config.risk.max_trades_per_hour = el.get("max_trades_per_hour", 0)
+        config.risk.min_time_between_trades_sec = el.get("min_time_between_trades_sec", 5)
 
         pt = risk_yaml.get("profit_targets", {})
         config.risk.daily_profit_target_usd = pt.get("daily_profit_target_usd", 20_000.0)
 
+        mr = risk_yaml.get("margin_rules", {})
+        config.risk.max_margin_utilization = mr.get("max_margin_utilization", 1.00)
+
         hb = risk_yaml.get("high_beta_specific", {})
-        config.risk.max_hold_time_minutes = hb.get("max_hold_time_minutes", 120)
+        config.risk.max_hold_time_minutes = hb.get("max_hold_time_minutes", 0)
         config.risk.trailing_stop_pct = hb.get("trailing_stop_pct", 1.5)
         config.risk.take_profit_ratio = hb.get("take_profit_ratio", 2.0)
 

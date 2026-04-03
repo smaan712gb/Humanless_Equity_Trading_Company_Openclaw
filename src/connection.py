@@ -9,6 +9,7 @@ from datetime import datetime
 from ib_async import IB, Contract, Stock, MarketOrder, LimitOrder, StopOrder, Order
 
 from .config import IBKRConfig
+from .market_calendar import requires_outside_rth, can_use_market_orders
 from .models import OpenPosition, Direction, PortfolioState
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,11 @@ class IBKRConnection:
             stopLossPrice=stop_loss_price,
         )
 
+        # Set outsideRth for ETH sessions
+        outside_rth = requires_outside_rth()
+        for order in bracket:
+            order.outsideRth = outside_rth
+
         order_ids = []
         for order in bracket:
             trade = self.ib.placeOrder(qualified, order)
@@ -210,13 +216,25 @@ class IBKRConnection:
         return order_ids
 
     async def place_market_close(self, ticker: str, action: str, quantity: int) -> int:
-        """Emergency market order to close a position."""
+        """Emergency close — uses MARKET in RTH, LIMIT at last price in ETH."""
         contract = self.make_stock_contract(ticker)
         qualified = await self.qualify_contract(contract)
         if not qualified:
             raise ValueError(f"Cannot qualify contract for {ticker}")
 
-        order = MarketOrder(action, quantity)
+        if can_use_market_orders():
+            order = MarketOrder(action, quantity)
+        else:
+            # In ETH, use aggressive limit order (sweep the book)
+            price = await self.get_market_price(ticker)
+            # Use a very aggressive limit (5% through the market)
+            if action == "SELL":
+                limit = price * 0.95 if price else 0.01
+            else:
+                limit = price * 1.05 if price else 999999
+            order = LimitOrder(action, quantity, limit)
+            order.outsideRth = True
+
         trade = self.ib.placeOrder(qualified, order)
         logger.warning(
             "EMERGENCY MARKET %s %s: %d shares (ID: %d)",
@@ -239,6 +257,7 @@ class IBKRConnection:
             totalQuantity=quantity,
             trailingPercent=trailing_pct,
         )
+        order.outsideRth = requires_outside_rth()
         trade = self.ib.placeOrder(qualified, order)
         logger.info(
             "Trailing stop %s %s: %d shares, trail %.1f%% (ID: %d)",

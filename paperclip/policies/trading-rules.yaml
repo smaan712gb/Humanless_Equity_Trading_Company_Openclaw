@@ -1,16 +1,80 @@
 # Trading Rules — Standing Orders for All Trading Agents
 # Injected into every trading agent's context via Paperclip adapter.
+# Updated: ETH/RTH aware, unlimited trades, full buying power.
 
 market_hours:
-  pre_market_scan: "08:00-09:25 ET"
-  active_trading: "09:30-15:45 ET"
-  no_new_entries_after: "15:30 ET"
-  force_flatten_by: "15:50 ET"       # all positions closed 10 min before close
-  post_market_review: "16:00-18:00 ET"
-  rsi_window: "18:00-22:00 ET"
+  # Extended Trading Hours — Pre-Market
+  eth_pre_market:
+    start: "04:00 ET"
+    end: "09:30 ET"
+    scan_start: "04:00 ET"           # Scout starts scanning at pre-market open
+    trading_allowed: true
+    rules:
+      - "LIMIT orders only — no MARKET orders"
+      - "Position size capped at 50% of normal (thin liquidity)"
+      - "Set outsideRth=True on all orders"
+      - "Focus on earnings reactions and overnight gap setups"
+      - "Wider stops required (2x normal ATR-based)"
+
+  # Regular Trading Hours
+  rth:
+    start: "09:30 ET"
+    end: "16:00 ET"
+    rules:
+      - "Full position sizing allowed"
+      - "All order types allowed"
+      - "All strategies active"
+      - "Primary profit-generation window"
+
+  # Extended Trading Hours — After-Market
+  eth_after_hours:
+    start: "16:00 ET"
+    end: "20:00 ET"
+    trading_allowed: true
+    rules:
+      - "LIMIT orders only — no MARKET orders"
+      - "Position size capped at 50% of normal"
+      - "Set outsideRth=True on all orders"
+      - "React to after-hours earnings and news"
+      - "Reduce activity after 18:00 (very thin liquidity)"
+
+  # Overnight
+  overnight:
+    allowed: true
+    max_positions: 5
+    rules:
+      - "Only hold overnight with strong catalyst (earnings beat, M&A, etc.)"
+      - "Max 30% portfolio exposure overnight"
+      - "Must have wider stops (3x normal)"
+      - "Strategist must explicitly approve overnight holds"
+
+  # Post-market analysis
+  post_market_review: "20:00-22:00 ET"
+  rsi_window: "22:00-23:59 ET"
+
+  # Early close days (market closes 13:00 ET)
+  early_close_rules:
+    flatten_by: "12:45 ET"
+    no_new_entries_after: "12:00 ET"
+
+holidays_2026:
+  closed:
+    - "2026-01-01"  # New Year's Day
+    - "2026-01-19"  # MLK Day
+    - "2026-02-16"  # Presidents' Day
+    - "2026-04-03"  # Good Friday ← TODAY
+    - "2026-05-25"  # Memorial Day
+    - "2026-06-19"  # Juneteenth
+    - "2026-07-03"  # Independence Day observed
+    - "2026-09-07"  # Labor Day
+    - "2026-11-26"  # Thanksgiving
+    - "2026-12-25"  # Christmas
+  early_close:
+    - "2026-11-27"  # Day after Thanksgiving (close 13:00 ET)
+    - "2026-12-24"  # Christmas Eve (close 13:00 ET)
 
 universe:
-  focus: "high-beta momentum equities"
+  focus: "high-beta momentum equities — long and short"
   core_watchlist:
     - ticker: LITE
       sector: semiconductors
@@ -29,25 +93,25 @@ universe:
     enabled: true
     criteria:
       min_beta: 1.5
-      min_avg_volume: 2000000
-      min_price: 20.00
-      max_price: 500.00
-      min_atr_pct: 2.0               # minimum 2% average true range
+      min_avg_volume: 1000000        # lowered to catch more setups
+      min_price: 10.00               # lowered — some high-beta names are cheaper
+      max_price: 1000.00             # raised — ASML is ~$800+
+      min_atr_pct: 1.5               # lowered slightly
       exchanges: [NYSE, NASDAQ]
-    max_hot_of_day_adds: 3            # max 3 new tickers discovered per day
-    require_analyst_approval: true
+    max_hot_of_day_adds: 10          # raised — unlimited trades means more tickers
+    require_analyst_approval: true    # still require validation
 
   excluded:
     - penny_stocks_below_5
     - spacs_pre_merger
     - chinese_adrs_delisting_risk
-    - meme_stocks_without_fundamentals
 
 strategies:
   momentum_breakout:
     description: "Enter on volume surge + price breakout above resistance"
     direction: long
     timeframe: 5m_15m
+    sessions: [eth_pre_market, rth, eth_after_hours]
     edge_requirement: "Volume 2x avg AND price above VWAP AND RSI < 75"
     position_size: half_kelly
     stop: trailing_1.5pct
@@ -55,10 +119,11 @@ strategies:
 
   mean_reversion:
     description: "Fade extreme moves on high-beta names"
-    direction: both  # long and short
+    direction: both
     timeframe: 1m_5m
+    sessions: [rth]  # needs full liquidity
     edge_requirement: "RSI > 85 (short) or RSI < 15 (long) AND at support/resistance"
-    position_size: quarter_kelly
+    position_size: half_kelly
     stop: fixed_1pct
     target: 1.5x_risk
 
@@ -66,8 +131,9 @@ strategies:
     description: "Fade opening gaps on high-beta stocks"
     direction: both
     timeframe: open_30min
+    sessions: [rth]  # opening bell only
     edge_requirement: "Gap > 3% AND no catalyst AND volume declining"
-    position_size: quarter_kelly
+    position_size: half_kelly
     stop: fixed_above_gap_high
     target: 50pct_gap_fill
 
@@ -75,24 +141,48 @@ strategies:
     description: "Trade the volatility expansion around earnings"
     direction: both
     timeframe: daily
+    sessions: [eth_pre_market, rth, eth_after_hours]  # earnings drop in ETH
     edge_requirement: "IV rank > 70 AND historical move > implied move"
-    position_size: quarter_kelly
+    position_size: half_kelly
     stop: fixed_2pct
     target: 3x_risk
-    note: "Strategist must get CEO approval for earnings plays"
+
+  scalp:
+    description: "Quick in-and-out on momentum spikes"
+    direction: both
+    timeframe: 1m
+    sessions: [rth]
+    edge_requirement: "Tape reading — large bid/ask imbalance + volume spike"
+    position_size: half_kelly
+    stop: fixed_0.5pct
+    target: 1x_risk
+    notes: "High frequency, small gains. Volume is key."
+
+  overnight_swing:
+    description: "Hold through overnight for gap continuation"
+    direction: both
+    timeframe: daily
+    sessions: [eth_after_hours]  # entered in after-hours
+    edge_requirement: "Strong catalyst + institutional accumulation + above VWAP into close"
+    position_size: quarter_kelly
+    stop: fixed_3pct  # wider for overnight
+    target: 3x_risk
+    notes: "Max 5 overnight positions. Strategist approval required."
 
 entry_rules:
   - "Every entry must have a predefined stop-loss and take-profit BEFORE execution"
   - "No averaging down on losing positions — EVER"
-  - "No adding to winners beyond original Kelly allocation"
   - "Scout and Analyst must both flag a ticker before Strategist can act"
   - "Compliance must validate against PDT and wash sale rules"
+  - "In ETH sessions: LIMIT orders only, outsideRth=True, half position size"
+  - "Check market calendar before every trade — no trading on holidays"
+  - "Unlimited trades allowed — trade as many setups as the edge supports"
 
 exit_rules:
   - "Position Manager monitors all open positions every 60 seconds"
   - "Trailing stop adjusts automatically based on ATR"
   - "If position hits 2:1 R/R, move stop to breakeven"
-  - "If daily target ($20K) is hit, close all positions and stop trading"
-  - "If drawdown limit (-2%) is hit, close all positions immediately"
-  - "No position held longer than 2 hours unless explicitly approved by Strategist"
-  - "All positions MUST be closed by 15:50 ET — no overnight holds"
+  - "Agents decide when to exit based on edge — no arbitrary time limits"
+  - "If drawdown limit (-3%) is hit, close all positions immediately"
+  - "On early close days, flatten by 12:45 ET"
+  - "Overnight holds allowed with Strategist approval (max 5 positions, wider stops)"
