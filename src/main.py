@@ -11,6 +11,7 @@ from datetime import datetime, time
 from .config import load_config, AppConfig
 from .connection import IBKRConnection
 from .deepseek_client import DeepSeekClient
+from .heartbeat import HeartbeatMonitor
 from .market_calendar import (
     is_market_holiday, is_any_session_active, get_current_session,
     Session, next_trading_day, get_session_info,
@@ -49,6 +50,7 @@ class TradingOrchestrator:
         self.ibkr = IBKRConnection(config.ibkr)
         self.deepseek = DeepSeekClient(config.deepseek)
         self.gatekeeper = RiskGatekeeper(config.risk)
+        self.heartbeat = HeartbeatMonitor(self.bus)
 
         # Agents
         self.ceo = CEOAgent(self.deepseek, self.bus, self.ibkr)
@@ -105,11 +107,15 @@ class TradingOrchestrator:
         logger.info("Account equity: $%s | Buying power: $%s",
                      f"{equity:,.2f}", f"{buying_power:,.2f}")
 
-        # 3. Start all agents
+        # 3. Start heartbeat monitor
+        await self.heartbeat.start()
+        logger.info("Paperclip heartbeat monitor started")
+
+        # 4. Start all agents
         for agent in self._all_agents:
             await agent.start()
 
-        # 4. Reset daily counters
+        # 5. Reset daily counters
         self.gatekeeper.reset_daily()
         self.scout.reset_daily()
 
@@ -122,6 +128,10 @@ class TradingOrchestrator:
         logger.info("Shutting down...")
         self._running = False
 
+        # Log final heartbeat status
+        logger.info(self.heartbeat.get_summary_line())
+
+        await self.heartbeat.stop()
         for agent in self._all_agents:
             await agent.stop()
 

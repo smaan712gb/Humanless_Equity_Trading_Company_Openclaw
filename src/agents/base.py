@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -66,6 +67,11 @@ class BaseAgent:
         if trader.exists():
             return trader
 
+        # Specialist match: agents/specialist/<name>/
+        specialist = PROJECT_ROOT / "agents" / "specialist" / self.name
+        if specialist.exists():
+            return specialist
+
         return None
 
     async def think(self, prompt: str, use_reasoner: bool = False) -> str:
@@ -117,15 +123,37 @@ class BaseAgent:
         logger.debug("[%s] Received %s from %s", self.name, message.message_type, message.from_agent)
 
     async def start(self):
-        """Start the agent and subscribe to the message bus."""
+        """Start the agent, subscribe to bus, and begin heartbeat."""
         self.bus.subscribe(self.name, self.on_message)
         self._running = True
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         logger.info("Agent '%s' started (model: %s)", self.name, self.model)
 
     async def stop(self):
-        """Stop the agent."""
+        """Stop the agent and its heartbeat."""
         self._running = False
+        if hasattr(self, '_heartbeat_task') and self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
         logger.info("Agent '%s' stopped", self.name)
+
+    async def _heartbeat_loop(self):
+        """Send periodic heartbeats to the Paperclip heartbeat monitor."""
+        from ..heartbeat import HeartbeatMonitor
+        interval = HeartbeatMonitor.AGENT_INTERVALS.get(self.name, 900)
+        while self._running:
+            try:
+                await self.send(
+                    to="heartbeat_monitor",
+                    message_type="heartbeat",
+                    payload={"status": "ok", "agent": self.name},
+                )
+            except Exception:
+                pass  # heartbeat failure shouldn't crash the agent
+            await asyncio.sleep(interval)
 
     def log_to_diary(self, entry: str):
         """Append an entry to today's daily diary."""
