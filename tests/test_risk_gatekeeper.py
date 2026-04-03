@@ -4,9 +4,9 @@ import pytest
 from unittest.mock import patch
 from datetime import datetime, time
 
-from src.config import RiskLimits
-from src.risk_gatekeeper import RiskGatekeeper
-from src.models import (
+from tools.config import RiskLimits
+from tools.risk_gatekeeper import RiskGatekeeper
+from tools.models import (
     TradePlan, PortfolioState, Direction, CircuitBreakerAction,
 )
 
@@ -49,10 +49,10 @@ def _valid_plan():
 
 # Shared mock context for "market is open" state
 _MARKET_OPEN_PATCHES = {
-    "src.risk_gatekeeper.is_market_holiday": False,
-    "src.risk_gatekeeper.is_any_session_active": True,
-    "src.risk_gatekeeper.get_position_size_multiplier": 1.0,
-    "src.risk_gatekeeper.can_use_market_orders": True,
+    "tools.risk_gatekeeper.is_market_holiday": False,
+    "tools.risk_gatekeeper.is_any_session_active": True,
+    "tools.risk_gatekeeper.get_position_size_multiplier": 1.0,
+    "tools.risk_gatekeeper.can_use_market_orders": True,
 }
 
 
@@ -92,9 +92,9 @@ class TestValidateTrade:
         assert result.approved is False
         assert "no_stop_loss" in result.violations
 
-    @patch("src.risk_gatekeeper.is_market_holiday", return_value=True)
-    @patch("src.risk_gatekeeper.is_any_session_active", return_value=False)
-    @patch("src.risk_gatekeeper.get_position_size_multiplier", return_value=0.0)
+    @patch("tools.risk_gatekeeper.is_market_holiday", return_value=True)
+    @patch("tools.risk_gatekeeper.is_any_session_active", return_value=False)
+    @patch("tools.risk_gatekeeper.get_position_size_multiplier", return_value=0.0)
     def test_holiday_rejected(self, *mocks):
         result = _gatekeeper().validate_trade(_valid_plan(), _portfolio())
         assert result.approved is False

@@ -1,0 +1,148 @@
+{
+  // OpenClaw Gateway Configuration — Humanless Equity Trading Company
+  // DeepSeek as primary provider, 15 agents with isolated workspaces
+
+  "gateway": {
+    "port": 18789,
+    "bindAddress": "127.0.0.1",
+    "auth": { "mode": "token" }
+  },
+
+  "models": {
+    "defaults": {
+      "primary": "deepseek/deepseek-chat"
+    },
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "apiKey": "${DEEPSEEK_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-chat",
+            "name": "DeepSeek V3.2 Chat",
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "deepseek-reasoner",
+            "name": "DeepSeek V3.2 Reasoner",
+            "contextWindow": 65536,
+            "maxTokens": 16384
+          }
+        ]
+      }
+    }
+  },
+
+  "heartbeat": {
+    "enabled": true,
+    "intervalSeconds": 1800
+  },
+
+  "agents": {
+    "defaults": {
+      "model": { "primary": "deepseek/deepseek-chat" },
+      "sandbox": { "mode": "off" },
+      "tools": { "allow": ["read", "exec", "write", "edit"] }
+    },
+
+    "list": [
+      // ── Core Team ──
+      {
+        "id": "ceo",
+        "workspace": "~/.openclaw/workspaces/ceo",
+        "model": { "primary": "deepseek/deepseek-reasoner" }
+      },
+      {
+        "id": "scout",
+        "workspace": "~/.openclaw/workspaces/scout",
+        "model": { "primary": "deepseek/deepseek-chat" }
+      },
+      {
+        "id": "analyst",
+        "workspace": "~/.openclaw/workspaces/analyst",
+        "model": { "primary": "deepseek/deepseek-reasoner" }
+      },
+      {
+        "id": "strategist",
+        "workspace": "~/.openclaw/workspaces/strategist",
+        "model": { "primary": "deepseek/deepseek-reasoner" }
+      },
+      {
+        "id": "executor",
+        "workspace": "~/.openclaw/workspaces/executor",
+        "model": { "primary": "deepseek/deepseek-chat" },
+        "tools": { "allow": ["read", "exec", "write", "edit"] }
+      },
+      {
+        "id": "position-manager",
+        "workspace": "~/.openclaw/workspaces/position-manager",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec", "write", "edit"] }
+      },
+      {
+        "id": "compliance",
+        "workspace": "~/.openclaw/workspaces/compliance",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read"], "deny": ["exec", "write"] }
+      },
+      {
+        "id": "auditor",
+        "workspace": "~/.openclaw/workspaces/auditor",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read"], "deny": ["exec", "write"] }
+      },
+
+      // ── Specialist Team ──
+      {
+        "id": "sector-trend-watcher",
+        "workspace": "~/.openclaw/workspaces/sector-trend-watcher",
+        "model": { "primary": "deepseek/deepseek-chat" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "volume-flow-analyst",
+        "workspace": "~/.openclaw/workspaces/volume-flow-analyst",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "twitter-sentiment",
+        "workspace": "~/.openclaw/workspaces/twitter-sentiment",
+        "model": { "primary": "deepseek/deepseek-chat" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "futures-index-watcher",
+        "workspace": "~/.openclaw/workspaces/futures-index-watcher",
+        "model": { "primary": "deepseek/deepseek-chat" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "earnings-calendar",
+        "workspace": "~/.openclaw/workspaces/earnings-calendar",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "options-flow-scanner",
+        "workspace": "~/.openclaw/workspaces/options-flow-scanner",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "technical-analyst",
+        "workspace": "~/.openclaw/workspaces/technical-analyst",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      },
+      {
+        "id": "short-interest-tracker",
+        "workspace": "~/.openclaw/workspaces/short-interest-tracker",
+        "model": { "primary": "deepseek/deepseek-reasoner" },
+        "tools": { "allow": ["read", "exec"], "deny": ["write"] }
+      }
+    ]
+  }
+}

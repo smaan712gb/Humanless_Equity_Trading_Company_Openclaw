@@ -1,3 +1,14 @@
+---
+name: ibkr-execution
+description: Place and manage orders on IBKR via ib_async — bracket orders, stops, trailing stops, adaptive algos
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: [python3]
+      env: [IBKR_HOST, IBKR_PORT]
+---
+
 # IBKR Execution Skill
 
 ## Description

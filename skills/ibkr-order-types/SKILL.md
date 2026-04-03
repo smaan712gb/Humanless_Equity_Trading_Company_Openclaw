@@ -1,3 +1,14 @@
+---
+name: ibkr-order-types
+description: Complete reference of IBKR order types with session-aware selection (ETH vs RTH) and implementation examples
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: []
+      env: []
+---
+
 # IBKR Order Types — Complete Reference
 
 ## Description

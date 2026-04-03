@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.config import IBKRConfig
-from src.connection import IBKRConnection
+from tools.config import IBKRConfig
+from tools.connection import IBKRConnection
 
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))

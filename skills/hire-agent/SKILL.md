@@ -1,3 +1,14 @@
+---
+name: hire-agent
+description: CEO skill to dynamically create and deploy new specialist agents at runtime
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: []
+      env: []
+---
+
 # Hire Agent Skill — CEO's Ability to Spawn Specialist Agents
 
 ## Description

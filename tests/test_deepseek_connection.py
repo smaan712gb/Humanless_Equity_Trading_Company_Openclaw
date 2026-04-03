@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.config import DeepSeekConfig
-from src.deepseek_client import DeepSeekClient
+from tools.config import DeepSeekConfig
+from tools.deepseek_client import DeepSeekClient
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 HAS_KEY = DEEPSEEK_KEY and DEEPSEEK_KEY != "PASTE_YOUR_DEEPSEEK_KEY_HERE"

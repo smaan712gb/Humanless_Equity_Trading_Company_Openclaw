@@ -1,3 +1,14 @@
+---
+name: news-sentiment
+description: Scan financial news for sentiment, catalysts, and breaking headlines on watched tickers
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: []
+      env: []
+---
+
 # News Sentiment Skill
 
 ## Description

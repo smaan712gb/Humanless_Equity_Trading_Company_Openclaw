@@ -1,3 +1,14 @@
+---
+name: position-monitor
+description: Query real-time open positions, P&L, account equity, and margin from IBKR
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: [python3]
+      env: [IBKR_HOST, IBKR_PORT]
+---
+
 # Position Monitor Skill
 
 ## Description

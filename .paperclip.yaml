@@ -1,0 +1,159 @@
+# Paperclip vendor configuration for Humanless Equity Trading Company
+# Defines adapter assignments, environment, and scheduled routines
+
+agents:
+  # ── Core Team ──
+  ceo:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  scout:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  analyst:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  strategist:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  executor:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  position-manager:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  compliance:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  auditor:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  # ── Specialist Team ──
+  sector-trend-watcher:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  volume-flow-analyst:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  twitter-sentiment:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  futures-index-watcher:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  earnings-calendar:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+  options-flow-scanner:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  technical-analyst:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      IBKR_HOST: ${IBKR_HOST}
+      IBKR_PORT: ${IBKR_PORT}
+
+  short-interest-tracker:
+    adapter: openclaw_gateway
+    env:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
+# ── Scheduled Routines (Paperclip cron) ──
+routines:
+  pre-market-scan:
+    trigger: schedule
+    cron: "0 4 * * 1-5"
+    timezone: America/New_York
+    agent: scout
+    description: "ETH pre-market universe scan"
+
+  morning-briefing:
+    trigger: schedule
+    cron: "0 8 * * 1-5"
+    timezone: America/New_York
+    agent: ceo
+    description: "CEO morning briefing — review audit, approve watchlist"
+
+  rth-open-prep:
+    trigger: schedule
+    cron: "25 9 * * 1-5"
+    timezone: America/New_York
+    agent: executor
+    description: "Verify IBKR connection and account state before market open"
+
+  midday-review:
+    trigger: schedule
+    cron: "0 12 * * 1-5"
+    timezone: America/New_York
+    agent: ceo
+    description: "Midday P&L review and strategy assessment"
+
+  daily-audit:
+    trigger: schedule
+    cron: "0 20 * * 1-5"
+    timezone: America/New_York
+    agent: auditor
+    description: "Post-market Attacker-Defender-Judge audit"
+
+  futures-overnight:
+    trigger: schedule
+    cron: "0 18 * * 0"
+    timezone: America/New_York
+    agent: futures-index-watcher
+    description: "Sunday futures open — report opening gap"
+
+  earnings-update:
+    trigger: schedule
+    cron: "0 7 * * 0"
+    timezone: America/New_York
+    agent: earnings-calendar
+    description: "Weekly earnings calendar update"
+
+  short-interest-update:
+    trigger: schedule
+    cron: "0 8 * * 2,4"
+    timezone: America/New_York
+    agent: short-interest-tracker
+    description: "Bi-weekly FINRA short interest data update"

@@ -1,3 +1,14 @@
+---
+name: market-calendar
+description: US equity market hours, ETH/RTH sessions, holidays, early closes, and IBKR session rules
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: []
+      env: []
+---
+
 # Market Calendar Skill
 
 ## Description

@@ -10,11 +10,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.config import load_config, RiskLimits
-from src.deepseek_client import DeepSeekClient
-from src.message_bus import MessageBus
-from src.risk_gatekeeper import RiskGatekeeper
-from src.models import (
+from tools.config import load_config, RiskLimits
+from tools.deepseek_client import DeepSeekClient
+from tools.message_bus import MessageBus
+from tools.risk_gatekeeper import RiskGatekeeper
+from tools.models import (
     ScoutReport, AnalystReport, TradePlan, Direction,
     PortfolioState, OpenPosition, AgentMessage,
 )
@@ -31,10 +31,10 @@ class TestTradeFlowUnit:
         self.config = load_config()
         self.gatekeeper = RiskGatekeeper(self.config.risk)
 
-    @patch("src.risk_gatekeeper.is_market_holiday", return_value=False)
-    @patch("src.risk_gatekeeper.is_any_session_active", return_value=True)
-    @patch("src.risk_gatekeeper.get_position_size_multiplier", return_value=1.0)
-    @patch("src.risk_gatekeeper.can_use_market_orders", return_value=True)
+    @patch("tools.risk_gatekeeper.is_market_holiday", return_value=False)
+    @patch("tools.risk_gatekeeper.is_any_session_active", return_value=True)
+    @patch("tools.risk_gatekeeper.get_position_size_multiplier", return_value=1.0)
+    @patch("tools.risk_gatekeeper.can_use_market_orders", return_value=True)
     def test_scout_to_gatekeeper_flow(self, *mocks):
         """Test: Scout report → Analyst report → Trade plan → Gatekeeper approval."""
 
@@ -81,10 +81,10 @@ class TestTradeFlowUnit:
         result = self.gatekeeper.validate_trade(trade_plan, portfolio)
         assert result.approved is True
 
-    @patch("src.risk_gatekeeper.is_market_holiday", return_value=False)
-    @patch("src.risk_gatekeeper.is_any_session_active", return_value=True)
-    @patch("src.risk_gatekeeper.get_position_size_multiplier", return_value=0.5)
-    @patch("src.risk_gatekeeper.can_use_market_orders", return_value=False)
+    @patch("tools.risk_gatekeeper.is_market_holiday", return_value=False)
+    @patch("tools.risk_gatekeeper.is_any_session_active", return_value=True)
+    @patch("tools.risk_gatekeeper.get_position_size_multiplier", return_value=0.5)
+    @patch("tools.risk_gatekeeper.can_use_market_orders", return_value=False)
     def test_eth_session_flow(self, *mocks):
         """Test that ETH session applies 50% size multiplier."""
         trade_plan = TradePlan(
@@ -189,7 +189,7 @@ async def test_bus_full_pipeline():
 @pytest.mark.skipif(not HAS_KEY, reason="DEEPSEEK_API_KEY not set")
 async def test_deepseek_scout_prompt():
     """Integration: send a real Scout-style prompt to DeepSeek and verify structured response."""
-    from src.config import DeepSeekConfig
+    from tools.config import DeepSeekConfig
     client = DeepSeekClient(DeepSeekConfig(api_key=DEEPSEEK_KEY))
     await client.start()
     try:

@@ -1,3 +1,14 @@
+---
+name: factor-mining
+description: Discover and backtest quantitative trading factors using RD-Agent and Microsoft Qlib
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: [python3]
+      env: []
+---
+
 # Factor Mining Skill
 
 ## Description

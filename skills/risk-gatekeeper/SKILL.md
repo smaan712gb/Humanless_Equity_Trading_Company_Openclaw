@@ -1,3 +1,14 @@
+---
+name: risk-gatekeeper
+description: Mechanical circuit breaker enforcing hard risk limits — validates every trade before execution
+user-invocable: false
+metadata:
+  openclaw:
+    requires:
+      bins: [python3]
+      env: []
+---
+
 # Risk Gatekeeper Skill
 
 ## Description
