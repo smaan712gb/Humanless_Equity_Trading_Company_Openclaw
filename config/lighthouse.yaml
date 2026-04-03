@@ -1,0 +1,67 @@
+# Tencent Cloud Lighthouse Configuration
+# Infrastructure hosting for the OpenClaw runtime.
+
+instance:
+  region: "na-ashburn"        # US-East — closest to NYSE/NASDAQ matching engines
+  plan: "compute-optimized"
+  cpu: 8
+  memory_gb: 32
+  storage_gb: 500
+  os: "Ubuntu 22.04 LTS"
+
+network:
+  bandwidth_mbps: 1000
+  static_ip: true
+  expected_latency_to_ibkr_ms: 12  # vs 45ms from typical cloud
+  protocol: websocket               # not REST
+
+software:
+  node_version: "20.x LTS"
+  python_version: "3.12"
+  openclaw_version: "latest"
+  ib_gateway_version: "10.30+"
+  ib_gateway_java_heap_mb: 4096
+
+security:
+  firewall:
+    allow_inbound:
+      - port: 22
+        source: "admin_ip_only"
+        protocol: tcp
+      - port: 3000
+        source: "admin_ip_only"  # OpenClaw Gateway
+        protocol: tcp
+    allow_outbound:
+      - port: 443
+        destination: "api.deepseek.com"
+      - port: 443
+        destination: "api.anthropic.com"
+      - port: 4001
+        destination: "127.0.0.1"  # IB Gateway internal
+    deny_all_other: true
+
+  encryption:
+    disk: aes-256
+    transit: tls-1.3
+    api_keys: "encrypted-env-vault"
+
+  monitoring:
+    uptime_check_interval_seconds: 60
+    alert_on_cpu_above_pct: 80
+    alert_on_memory_above_pct: 85
+    alert_on_disk_above_pct: 70
+    restart_on_crash: true
+    max_auto_restarts: 3
+
+backup:
+  frequency: daily
+  retention_days: 30
+  includes:
+    - "./memory/"
+    - "./sessions/"
+    - "./data/"
+    - "./agents/"
+    - "./config/"
+  excludes:
+    - "./node_modules/"
+    - "./.venv/"

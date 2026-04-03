@@ -1,0 +1,98 @@
+# Trading Rules — Standing Orders for All Trading Agents
+# Injected into every trading agent's context via Paperclip adapter.
+
+market_hours:
+  pre_market_scan: "08:00-09:25 ET"
+  active_trading: "09:30-15:45 ET"
+  no_new_entries_after: "15:30 ET"
+  force_flatten_by: "15:50 ET"       # all positions closed 10 min before close
+  post_market_review: "16:00-18:00 ET"
+  rsi_window: "18:00-22:00 ET"
+
+universe:
+  focus: "high-beta momentum equities"
+  core_watchlist:
+    - ticker: LITE
+      sector: semiconductors
+      notes: "Photonics, extreme beta, earnings mover"
+    - ticker: ASML
+      sector: semiconductors
+      notes: "EUV lithography monopoly, high-beta on semi cycle"
+    - ticker: MU
+      sector: semiconductors
+      notes: "Memory cycle play, high beta to PC/AI demand"
+    - ticker: APP
+      sector: software
+      notes: "AdTech momentum, high short interest"
+
+  dynamic_discovery:
+    enabled: true
+    criteria:
+      min_beta: 1.5
+      min_avg_volume: 2000000
+      min_price: 20.00
+      max_price: 500.00
+      min_atr_pct: 2.0               # minimum 2% average true range
+      exchanges: [NYSE, NASDAQ]
+    max_hot_of_day_adds: 3            # max 3 new tickers discovered per day
+    require_analyst_approval: true
+
+  excluded:
+    - penny_stocks_below_5
+    - spacs_pre_merger
+    - chinese_adrs_delisting_risk
+    - meme_stocks_without_fundamentals
+
+strategies:
+  momentum_breakout:
+    description: "Enter on volume surge + price breakout above resistance"
+    direction: long
+    timeframe: 5m_15m
+    edge_requirement: "Volume 2x avg AND price above VWAP AND RSI < 75"
+    position_size: half_kelly
+    stop: trailing_1.5pct
+    target: 2x_risk
+
+  mean_reversion:
+    description: "Fade extreme moves on high-beta names"
+    direction: both  # long and short
+    timeframe: 1m_5m
+    edge_requirement: "RSI > 85 (short) or RSI < 15 (long) AND at support/resistance"
+    position_size: quarter_kelly
+    stop: fixed_1pct
+    target: 1.5x_risk
+
+  gap_fade:
+    description: "Fade opening gaps on high-beta stocks"
+    direction: both
+    timeframe: open_30min
+    edge_requirement: "Gap > 3% AND no catalyst AND volume declining"
+    position_size: quarter_kelly
+    stop: fixed_above_gap_high
+    target: 50pct_gap_fill
+
+  earnings_volatility:
+    description: "Trade the volatility expansion around earnings"
+    direction: both
+    timeframe: daily
+    edge_requirement: "IV rank > 70 AND historical move > implied move"
+    position_size: quarter_kelly
+    stop: fixed_2pct
+    target: 3x_risk
+    note: "Strategist must get CEO approval for earnings plays"
+
+entry_rules:
+  - "Every entry must have a predefined stop-loss and take-profit BEFORE execution"
+  - "No averaging down on losing positions — EVER"
+  - "No adding to winners beyond original Kelly allocation"
+  - "Scout and Analyst must both flag a ticker before Strategist can act"
+  - "Compliance must validate against PDT and wash sale rules"
+
+exit_rules:
+  - "Position Manager monitors all open positions every 60 seconds"
+  - "Trailing stop adjusts automatically based on ATR"
+  - "If position hits 2:1 R/R, move stop to breakeven"
+  - "If daily target ($20K) is hit, close all positions and stop trading"
+  - "If drawdown limit (-2%) is hit, close all positions immediately"
+  - "No position held longer than 2 hours unless explicitly approved by Strategist"
+  - "All positions MUST be closed by 15:50 ET — no overnight holds"

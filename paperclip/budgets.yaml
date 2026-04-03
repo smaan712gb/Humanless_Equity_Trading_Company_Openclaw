@@ -1,0 +1,49 @@
+# Paperclip Budget Configuration
+# Controls spending on AI inference, data feeds, and infrastructure.
+
+daily_budgets:
+  deepseek_inference:
+    max_usd: 50.00
+    alert_at: 40.00
+    breakdown:
+      scout: 5.00
+      analyst: 8.00
+      strategist: 15.00
+      executor: 5.00
+      position_manager: 10.00
+      compliance: 3.00
+      auditor: 4.00
+
+  claude_inference:
+    max_usd: 10.00
+    alert_at: 8.00
+    note: "Only for code review and debugging tasks"
+
+  market_data:
+    max_usd: 15.00
+    sources: [ibkr_streaming, news_apis]
+
+  infrastructure:
+    max_usd: 25.00
+    breakdown:
+      tencent_lighthouse: 20.00
+      storage: 5.00
+
+  total_daily_ops_budget: 100.00
+
+trading_capital:
+  account: ibkr_live
+  buying_power_target: 500000  # minimum to sustain $20K daily
+  max_margin_usage: 0.60       # 60% of available margin
+  reserve_cash: 50000          # untouchable emergency reserve
+
+profit_targets:
+  daily: 20000
+  weekly: 80000   # 4 trading days (buffer for 1 flat day)
+  monthly: 350000
+
+cost_controls:
+  max_tokens_per_agent_turn: 8192
+  max_reasoning_loops_per_decision: 5
+  kill_inference_on_daily_pnl_target: true  # stop trading once $20K hit
+  reduce_inference_after_hours: true
