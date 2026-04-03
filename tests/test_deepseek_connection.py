@@ -83,7 +83,7 @@ async def test_deepseek_bad_key():
             messages=[{"role": "user", "content": "test"}],
             max_tokens=5,
         )
-        # Should return error, not crash
-        assert "error" in response or "choices" in response
+        # Should return error dict, not crash
+        assert "error" in response
     finally:
         await client.stop()

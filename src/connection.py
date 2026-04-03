@@ -24,7 +24,6 @@ class IBKRConnection:
         self._connected = False
         self._account = ""
         self._connect_time: datetime | None = None
-        self._last_heartbeat: datetime | None = None
 
     async def connect(self) -> bool:
         """Establish connection to TWS/Gateway."""
@@ -33,7 +32,7 @@ class IBKRConnection:
                 self.config.host,
                 self.config.port,
                 clientId=self.config.client_id,
-                timeout=self.config.timeout,
+                timeout=30,  # 30 second timeout for initial connect
             )
             self._connected = True
             self._connect_time = datetime.now()
@@ -45,7 +44,6 @@ class IBKRConnection:
             else:
                 logger.warning("Connected but no managed accounts found")
 
-            # Subscribe to disconnect event
             self.ib.disconnectedEvent += self._on_disconnect
             return True
 
@@ -83,24 +81,37 @@ class IBKRConnection:
         return False
 
     # ── Account & Portfolio Queries ──────────────────────────────────
+    # NOTE: ib_async sync methods (accountSummary, pnl) use run_until_complete
+    # which crashes in an already-running async loop. Use the async versions.
 
     async def get_account_summary(self) -> dict[str, float]:
-        """Get key account metrics."""
-        summary = self.ib.accountSummary(self._account)
+        """Get key account metrics using async API."""
+        try:
+            # Request account summary asynchronously
+            await self.ib.reqAccountSummaryAsync()
+            # Now read the cached data
+            summary = self.ib.accountSummary(self._account)
+        except Exception:
+            # Fallback: use accountValues which are auto-subscribed on connect
+            summary = self.ib.accountValues(self._account)
+
         result = {}
         for item in summary:
-            if item.tag in (
+            tag = getattr(item, 'tag', '')
+            value = getattr(item, 'value', '')
+            if tag in (
                 "NetLiquidation", "BuyingPower", "MaintMarginReq",
                 "AvailableFunds", "GrossPositionValue",
             ):
                 try:
-                    result[item.tag] = float(item.value)
-                except ValueError:
+                    result[tag] = float(value)
+                except (ValueError, TypeError):
                     pass
         return result
 
     async def get_positions(self) -> list[OpenPosition]:
         """Get all current open positions."""
+        # positions() returns cached data — safe to call in async context
         positions = self.ib.positions(self._account)
         result = []
         for pos in positions:
@@ -126,10 +137,19 @@ class IBKRConnection:
         margin_req = summary.get("MaintMarginReq", 0.0)
         margin_pct = margin_req / equity if equity > 0 else 0.0
 
-        pnl = self.ib.pnl(self._account)
-        daily_pnl = pnl.dailyPnL if pnl and pnl.dailyPnL else 0.0
-        unrealized = pnl.unrealizedPnL if pnl and pnl.unrealizedPnL else 0.0
-        realized = pnl.realizedPnL if pnl and pnl.realizedPnL else 0.0
+        # Try to get P&L — reqPnL is auto-subscribed on connect
+        daily_pnl = 0.0
+        unrealized = 0.0
+        realized = 0.0
+        try:
+            pnl_list = self.ib.pnl(self._account)
+            if pnl_list:
+                pnl = pnl_list if not isinstance(pnl_list, list) else pnl_list[0]
+                daily_pnl = pnl.dailyPnL if pnl.dailyPnL else 0.0
+                unrealized = pnl.unrealizedPnL if pnl.unrealizedPnL else 0.0
+                realized = pnl.realizedPnL if pnl.realizedPnL else 0.0
+        except Exception as e:
+            logger.debug("P&L not available: %s", e)
 
         return PortfolioState(
             equity=equity,
@@ -145,8 +165,14 @@ class IBKRConnection:
 
     async def get_daily_pnl(self) -> float:
         """Get aggregate daily P&L."""
-        pnl = self.ib.pnl(self._account)
-        return pnl.dailyPnL if pnl and pnl.dailyPnL else 0.0
+        try:
+            pnl = self.ib.pnl(self._account)
+            if pnl:
+                p = pnl if not isinstance(pnl, list) else pnl[0]
+                return p.dailyPnL if p.dailyPnL else 0.0
+        except Exception:
+            pass
+        return 0.0
 
     # ── Market Data ──────────────────────────────────────────────────
 
@@ -199,7 +225,6 @@ class IBKRConnection:
             stopLossPrice=stop_loss_price,
         )
 
-        # Set outsideRth for ETH sessions
         outside_rth = requires_outside_rth()
         for order in bracket:
             order.outsideRth = outside_rth
@@ -225,9 +250,7 @@ class IBKRConnection:
         if can_use_market_orders():
             order = MarketOrder(action, quantity)
         else:
-            # In ETH, use aggressive limit order (sweep the book)
             price = await self.get_market_price(ticker)
-            # Use a very aggressive limit (5% through the market)
             if action == "SELL":
                 limit = price * 0.95 if price else 0.01
             else:
@@ -237,7 +260,7 @@ class IBKRConnection:
 
         trade = self.ib.placeOrder(qualified, order)
         logger.warning(
-            "EMERGENCY MARKET %s %s: %d shares (ID: %d)",
+            "EMERGENCY %s %s: %d shares (ID: %d)",
             action, ticker, quantity, trade.order.orderId,
         )
         return trade.order.orderId
@@ -245,7 +268,43 @@ class IBKRConnection:
     async def place_trailing_stop(
         self, ticker: str, action: str, quantity: int, trailing_pct: float
     ) -> int:
-        """Place a trailing stop order."""
+        """Place a trailing stop — uses TRAIL LIMIT in ETH, TRAIL in RTH."""
+        contract = self.make_stock_contract(ticker)
+        qualified = await self.qualify_contract(contract)
+        if not qualified:
+            raise ValueError(f"Cannot qualify contract for {ticker}")
+
+        outside_rth = requires_outside_rth()
+        if outside_rth:
+            # ETH: TRAIL LIMIT (TRAIL not supported outside RTH for equities)
+            order = Order(
+                action=action,
+                orderType="TRAIL LIMIT",
+                totalQuantity=quantity,
+                trailingPercent=trailing_pct,
+                lmtPriceOffset=0.10,  # limit offset from trail price
+            )
+        else:
+            order = Order(
+                action=action,
+                orderType="TRAIL",
+                totalQuantity=quantity,
+                trailingPercent=trailing_pct,
+            )
+        order.outsideRth = outside_rth
+        trade = self.ib.placeOrder(qualified, order)
+        logger.info(
+            "Trailing stop %s %s: %d shares, trail %.1f%%, type=%s (ID: %d)",
+            action, ticker, quantity, trailing_pct, order.orderType,
+            trade.order.orderId,
+        )
+        return trade.order.orderId
+
+    async def place_stop_limit(
+        self, ticker: str, action: str, quantity: int,
+        stop_price: float, limit_price: float,
+    ) -> int:
+        """Place a stop-limit order (preferred over plain stop)."""
         contract = self.make_stock_contract(ticker)
         qualified = await self.qualify_contract(contract)
         if not qualified:
@@ -253,15 +312,81 @@ class IBKRConnection:
 
         order = Order(
             action=action,
-            orderType="TRAIL",
+            orderType="STP LMT",
             totalQuantity=quantity,
-            trailingPercent=trailing_pct,
+            auxPrice=stop_price,
+            lmtPrice=limit_price,
         )
         order.outsideRth = requires_outside_rth()
         trade = self.ib.placeOrder(qualified, order)
         logger.info(
-            "Trailing stop %s %s: %d shares, trail %.1f%% (ID: %d)",
-            action, ticker, quantity, trailing_pct, trade.order.orderId,
+            "Stop-limit %s %s: %d shares, stop=$%.2f limit=$%.2f (ID: %d)",
+            action, ticker, quantity, stop_price, limit_price, trade.order.orderId,
+        )
+        return trade.order.orderId
+
+    async def place_adaptive_order(
+        self, ticker: str, action: str, quantity: int,
+        limit_price: float, urgency: str = "Normal",
+    ) -> int:
+        """Place an Adaptive algo order for better fill quality on large orders."""
+        contract = self.make_stock_contract(ticker)
+        qualified = await self.qualify_contract(contract)
+        if not qualified:
+            raise ValueError(f"Cannot qualify contract for {ticker}")
+
+        from ib_async import TagValue
+        order = Order(
+            action=action,
+            orderType="LMT",
+            totalQuantity=quantity,
+            lmtPrice=limit_price,
+            algoStrategy="Adaptive",
+            algoParams=[TagValue("adaptivePriority", urgency)],
+        )
+        order.outsideRth = requires_outside_rth()
+        trade = self.ib.placeOrder(qualified, order)
+        logger.info(
+            "Adaptive %s %s: %d shares @ $%.2f, urgency=%s (ID: %d)",
+            action, ticker, quantity, limit_price, urgency, trade.order.orderId,
+        )
+        return trade.order.orderId
+
+    async def place_midprice_order(
+        self, ticker: str, action: str, quantity: int, cap_price: float,
+    ) -> int:
+        """Place a midprice order for price improvement."""
+        contract = self.make_stock_contract(ticker)
+        qualified = await self.qualify_contract(contract)
+        if not qualified:
+            raise ValueError(f"Cannot qualify contract for {ticker}")
+
+        order = Order(
+            action=action,
+            orderType="MIDPRICE",
+            totalQuantity=quantity,
+            lmtPrice=cap_price,
+        )
+        order.outsideRth = requires_outside_rth()
+        trade = self.ib.placeOrder(qualified, order)
+        logger.info(
+            "Midprice %s %s: %d shares, cap=$%.2f (ID: %d)",
+            action, ticker, quantity, cap_price, trade.order.orderId,
+        )
+        return trade.order.orderId
+
+    async def place_moc_order(self, ticker: str, action: str, quantity: int) -> int:
+        """Place a Market-on-Close order for end-of-day flatten."""
+        contract = self.make_stock_contract(ticker)
+        qualified = await self.qualify_contract(contract)
+        if not qualified:
+            raise ValueError(f"Cannot qualify contract for {ticker}")
+
+        order = Order(action=action, orderType="MOC", totalQuantity=quantity)
+        trade = self.ib.placeOrder(qualified, order)
+        logger.info(
+            "MOC %s %s: %d shares (ID: %d)",
+            action, ticker, quantity, trade.order.orderId,
         )
         return trade.order.orderId
 

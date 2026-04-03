@@ -1,5 +1,5 @@
 ib_async>=1.0.0
-aiohttp>=3.9.0
+openai>=1.30.0
 pydantic>=2.5.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
